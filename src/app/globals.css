@@ -1,0 +1,86 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+@import "tailwindcss";
+
+@theme {
+  /* Brand colors */
+  --color-charcoal: #1C1917;
+  --color-charcoal-card: #292524;
+  --color-amber: #D97706;
+  --color-amber-deep: #B45309;
+  --color-amber-light: #FEF3C7;
+  --color-stone: #78716C;
+  --color-cream: #FAFAF9;
+  --color-cream-alt: #F5F5F4;
+  --color-divider: #E7E5E4;
+
+  /* Functional colors */
+  --color-success: #16A34A;
+  --color-warning: #CA8A04;
+  --color-error: #DC2626;
+  --color-info: #475569;
+
+  /* Fonts */
+  --font-sans: 'Inter', system-ui, -apple-system, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, monospace;
+
+  /* Border radius */
+  --radius-card: 12px;
+
+  /* Max widths */
+  --max-w-content: 1152px;
+  --max-w-prose: 896px;
+}
+
+:root {
+  --background: var(--color-cream);
+  --foreground: var(--color-charcoal);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans);
+  font-size: 1rem;
+  line-height: 1.6;
+  margin: 0;
+  padding: 0;
+}
+
+/* Bottom nav safe area on mobile */
+@media (max-width: 767px) {
+  main {
+    padding-bottom: 4.5rem; /* 72px -- clears bottom nav */
+  }
+}
+
+/* Height display — monospace, amber, prominent */
+.height-display {
+  font-family: var(--font-mono);
+  color: var(--color-amber);
+  font-weight: 500;
+}
+
+/* Photo blur levels */
+.blur-0 { filter: blur(0px); }
+.blur-1 { filter: blur(4px); }
+.blur-2 { filter: blur(12px); }
+.blur-3 { filter: blur(24px); }
+.blur-4 { filter: blur(40px); }
+
+/* Reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
