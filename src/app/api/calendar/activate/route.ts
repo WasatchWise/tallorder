@@ -21,32 +21,24 @@ export async function POST() {
     return NextResponse.json({ error: 'already_active', active_until: existing.active_until }, { status: 409 })
   }
 
-  // Check token balance
-  const { data: bal } = await supabase
-    .from('token_balances')
-    .select('balance, escrowed')
-    .eq('user_id', user.id)
-    .maybeSingle()
-
-  const available = (bal?.balance ?? 0) - (bal?.escrowed ?? 0)
-  if (available < ACTIVATE_COST) {
-    return NextResponse.json({ error: 'insufficient_tokens', available }, { status: 402 })
-  }
-
-  const activeUntil = new Date(Date.now() + WINDOW_DAYS * 24 * 60 * 60 * 1000).toISOString()
-
-  // Deduct tokens
+  // Atomically check balance and deduct
   const admin = createAdminClient()
-  await admin
-    .from('token_balances')
-    .update({ balance: bal!.balance - ACTIVATE_COST, updated_at: new Date().toISOString() })
-    .eq('user_id', user.id)
+  const { data: deduct } = await admin.rpc('spend_tokens', {
+    p_user_id: user.id,
+    p_amount: ACTIVATE_COST,
+  })
+  const result = deduct?.[0]
+  if (!result?.ok) {
+    return NextResponse.json({ error: 'insufficient_tokens', available: result?.available_after ?? 0 }, { status: 402 })
+  }
 
   await admin.from('token_transactions').insert({
     user_id: user.id,
     amount: -ACTIVATE_COST,
     type: 'calendar_spend',
   })
+
+  const activeUntil = new Date(Date.now() + WINDOW_DAYS * 24 * 60 * 60 * 1000).toISOString()
 
   // Create/replace activation
   await supabase

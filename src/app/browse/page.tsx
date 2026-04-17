@@ -118,7 +118,10 @@ export default async function BrowsePage({ searchParams }: { searchParams: Searc
     .order('last_active', { ascending: false })
     .limit(48)
 
-  // Resolve photo storage paths to signed URLs (15-min expiry)
+  // Resolve photo storage paths to signed URLs (15-min expiry).
+  // For blurred photos (blur_level_default > 1), serve a 20x20 transform so the raw
+  // full-resolution bytes are never sent to the browser — CSS blur alone is bypassable
+  // via DevTools. blur_level 1 means the owner opted into full visibility on browse.
   const profilesWithUrls = await Promise.all((profiles ?? []).map(async p => {
     const photos = (p.photos as Record<string, unknown>[]) ?? []
     return {
@@ -126,7 +129,13 @@ export default async function BrowsePage({ searchParams }: { searchParams: Searc
       photos: await Promise.all(photos.map(async ph => {
         let url: string | null = null
         if (ph.approved && ph.storage_path) {
-          const { data } = await supabase.storage.from('tall-order-photos').createSignedUrl(ph.storage_path as string, 900)
+          const blurLevel = (ph.blur_level_default as number) ?? 3
+          const needsTransform = blurLevel > 1
+          const { data } = await supabase.storage.from('tall-order-photos').createSignedUrl(
+            ph.storage_path as string,
+            900,
+            needsTransform ? { transform: { width: 20, height: 20, resize: 'cover' } } : undefined
+          )
           url = data?.signedUrl ?? null
         }
         return { ...ph, url }

@@ -20,32 +20,26 @@ export async function POST() {
     return NextResponse.json({ error: 'not_activated' }, { status: 404 })
   }
 
-  const { data: bal } = await supabase
-    .from('token_balances')
-    .select('balance, escrowed')
-    .eq('user_id', user.id)
-    .maybeSingle()
-
-  const available = (bal?.balance ?? 0) - (bal?.escrowed ?? 0)
-  if (available < RENEW_COST) {
-    return NextResponse.json({ error: 'insufficient_tokens', available }, { status: 402 })
-  }
-
-  // Extend from whichever is later: now or current expiry (allows early renewal without losing time)
-  const base = new Date(activation.active_until) > new Date() ? new Date(activation.active_until) : new Date()
-  const activeUntil = new Date(base.getTime() + WINDOW_DAYS * 24 * 60 * 60 * 1000).toISOString()
-
+  // Atomically check balance and deduct
   const admin = createAdminClient()
-  await admin
-    .from('token_balances')
-    .update({ balance: bal!.balance - RENEW_COST, updated_at: new Date().toISOString() })
-    .eq('user_id', user.id)
+  const { data: deduct } = await admin.rpc('spend_tokens', {
+    p_user_id: user.id,
+    p_amount: RENEW_COST,
+  })
+  const result = deduct?.[0]
+  if (!result?.ok) {
+    return NextResponse.json({ error: 'insufficient_tokens', available: result?.available_after ?? 0 }, { status: 402 })
+  }
 
   await admin.from('token_transactions').insert({
     user_id: user.id,
     amount: -RENEW_COST,
     type: 'calendar_renew',
   })
+
+  // Extend from whichever is later: now or current expiry (allows early renewal without losing time)
+  const base = new Date(activation.active_until) > new Date() ? new Date(activation.active_until) : new Date()
+  const activeUntil = new Date(base.getTime() + WINDOW_DAYS * 24 * 60 * 60 * 1000).toISOString()
 
   await supabase
     .from('calendar_activations')

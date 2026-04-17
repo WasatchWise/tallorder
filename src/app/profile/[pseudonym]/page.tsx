@@ -125,14 +125,19 @@ export default async function ProfilePage({ params }: { params: Promise<{ pseudo
   const blurPx = [0, 4, 12, 24, 40][blurLevel - 1] ?? 12
   const heightDisplay = `${profile.height_ft}'${profile.height_in || 0}"`
 
-  // Generate signed URLs for photos (all if revealed, just primary otherwise)
+  // Generate signed URLs for photos (all if revealed, just primary otherwise).
+  // Unrevealed: serve 20x20 transform so full-res bytes never reach the client.
   const photosToShow = revealed ? photos : (primaryPhoto ? [primaryPhoto] : [])
   const photoUrls: (string | null)[] = await Promise.all(
-    photosToShow.map(async (p: { storage_path: string }) =>
-      p.storage_path
-        ? (await supabase.storage.from('tall-order-photos').createSignedUrl(p.storage_path, 900)).data?.signedUrl ?? null
-        : null
-    )
+    photosToShow.map(async (p: { storage_path: string }) => {
+      if (!p.storage_path) return null
+      const { data } = await supabase.storage.from('tall-order-photos').createSignedUrl(
+        p.storage_path,
+        900,
+        revealed ? undefined : { transform: { width: 20, height: 20, resize: 'cover' } }
+      )
+      return data?.signedUrl ?? null
+    })
   )
   const primaryPhotoUrl = photoUrls[0] ?? null
 

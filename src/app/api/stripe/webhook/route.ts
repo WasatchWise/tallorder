@@ -30,6 +30,14 @@ export async function POST(req: Request) {
       if (cs.metadata?.type === 'token_pack') {
         const tokens = parseInt(cs.metadata.tokens ?? '0', 10)
         if (tokens > 0) {
+          // Idempotency: skip if this checkout session was already processed
+          const { data: alreadyProcessed } = await supabase
+            .from('token_transactions')
+            .select('id')
+            .eq('reference_id', cs.id)
+            .maybeSingle()
+          if (alreadyProcessed) break
+
           // Credit the tokens
           const { data: existing } = await supabase
             .from('token_balances')
@@ -56,7 +64,7 @@ export async function POST(req: Request) {
           await supabase.from('token_transactions').insert({
             user_id: userId,
             amount: tokens,
-            type: 'token_purchase',
+            type: 'purchase',
             reference_id: cs.id,
           })
         }

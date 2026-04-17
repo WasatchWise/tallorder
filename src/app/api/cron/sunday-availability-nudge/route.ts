@@ -5,7 +5,7 @@ import { sendEmail } from '@/lib/email/send'
 // Vercel cron: "0 2 * * 1" = 2:00am UTC Monday = ~7-8pm MST Sunday
 // Protected by CRON_SECRET set in Vercel env vars
 
-export async function POST(req: Request) {
+export async function GET(req: Request) {
   const auth = req.headers.get('authorization')
   if (auth !== `Bearer ${process.env.CRON_SECRET}`) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })

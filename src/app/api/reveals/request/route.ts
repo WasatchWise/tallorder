@@ -20,44 +20,39 @@ export async function POST(req: Request) {
   const { data: targetProfile } = await supabase.from('profiles').select('role').eq('id', targetId).maybeSingle()
   if (targetProfile?.role === 'admin') return NextResponse.json({ error: 'Cannot reveal admin accounts' }, { status: 403 })
 
-  // Get or create token balance
-  const { data: bal } = await supabase
-    .from('token_balances')
-    .select('balance, escrowed')
-    .eq('user_id', user.id)
-    .maybeSingle()
-
-  const available = (bal?.balance ?? 0) - (bal?.escrowed ?? 0)
-  if (available < 3) {
-    return NextResponse.json({ error: 'insufficient_tokens', available }, { status: 402 })
-  }
-
   // Check for existing pending reveal to this target
   const { data: existing } = await supabase
     .from('photo_reveals')
-    .select('id, status')
+    .select('id')
     .eq('requester_id', user.id)
     .eq('owner_id', targetId)
     .eq('status', 'pending')
     .maybeSingle()
 
-  if (existing) {
-    return NextResponse.json({ error: 'already_pending' }, { status: 409 })
-  }
+  if (existing) return NextResponse.json({ error: 'already_pending' }, { status: 409 })
 
   // Check 30-day cooldown (declined or expired in last 30 days)
   const cutoff = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString()
   const { data: recent } = await supabase
     .from('photo_reveals')
-    .select('id, status, resolved_at')
+    .select('id')
     .eq('requester_id', user.id)
     .eq('owner_id', targetId)
     .in('status', ['declined', 'expired'])
     .gte('resolved_at', cutoff)
     .maybeSingle()
 
-  if (recent) {
-    return NextResponse.json({ error: 'cooldown_active' }, { status: 429 })
+  if (recent) return NextResponse.json({ error: 'cooldown_active' }, { status: 429 })
+
+  // Atomically escrow tokens — blocks concurrent requests from racing
+  const admin = createAdminClient()
+  const { data: deduct } = await admin.rpc('request_reveal_tokens', {
+    p_user_id: user.id,
+    p_amount: 3,
+  })
+  const result = deduct?.[0]
+  if (!result?.ok) {
+    return NextResponse.json({ error: 'insufficient_tokens', available: result?.available_after ?? 0 }, { status: 402 })
   }
 
   const expiresAt = new Date(Date.now() + 72 * 60 * 60 * 1000).toISOString()
@@ -76,24 +71,9 @@ export async function POST(req: Request) {
     .single()
 
   if (revealError || !reveal) {
+    // Compensate: reverse the atomic escrow (balance was decremented 3, escrowed was incremented 3)
+    await admin.rpc('release_escrowed_tokens', { p_user_id: user.id, p_amount: 3 })
     return NextResponse.json({ error: 'Failed to create reveal' }, { status: 500 })
-  }
-
-  // Place tokens in escrow (use admin client -- RLS blocks user writes on token tables)
-  const admin = createAdminClient()
-  if (!bal) {
-    await admin.from('token_balances').insert({
-      user_id: user.id,
-      balance: -3,
-      escrowed: 3,
-      lifetime_spent: 3,
-    })
-  } else {
-    await admin.from('token_balances').update({
-      balance: bal.balance - 3,
-      escrowed: (bal.escrowed ?? 0) + 3,
-      updated_at: new Date().toISOString(),
-    }).eq('user_id', user.id)
   }
 
   // Log transaction
@@ -104,7 +84,7 @@ export async function POST(req: Request) {
     reference_id: reveal.id,
   })
 
-  // Notify photo owner (fire-and-forget, never block response)
+  // Notify photo owner (fire-and-forget)
   try {
     const { data: ownerProfile } = await supabase
       .from('profiles')
