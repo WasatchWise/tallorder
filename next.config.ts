@@ -29,7 +29,7 @@ const securityHeaders = [
 ]
 
 const nextConfig: NextConfig = {
-  typescript: { ignoreBuildErrors: true },
+  serverExternalPackages: ['sharp'],
   images: {
     remotePatterns: [
       { protocol: 'https', hostname: '**.supabase.co' },
