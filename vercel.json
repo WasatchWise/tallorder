@@ -1,8 +1,5 @@
 {
   "framework": "nextjs",
-  "installCommand": "cd ../.. && pnpm install --no-frozen-lockfile",
-  "buildCommand": "cd ../.. && pnpm run build --filter=tall-order",
-  "ignoreCommand": "npx turbo-ignore tall-order",
   "crons": [
     {
       "path": "/api/cron/sunday-availability-nudge",
