@@ -165,25 +165,12 @@ export default function OnboardingPage() {
       // Grant initial tokens via server route (handles founding 500 check)
       await fetch('/api/onboarding/grant-tokens', { method: 'POST' })
 
-      // Upload photos
+      // Upload photos via server route (generates blurred variants via sharp)
       for (let i = 0; i < photos.length; i++) {
-        const file = photos[i]
-        const ext = file.name.split('.').pop()
-        const path = `${user.id}/${Date.now()}-${i}.${ext}`
-
-        const { error: uploadError } = await supabase.storage
-          .from('tall-order-photos')
-          .upload(path, file, { contentType: file.type })
-
-        if (!uploadError) {
-          await supabase.from('photos').insert({
-            user_id: user.id,
-            storage_path: path,
-            blur_level_default: 3,
-            is_primary: i === 0,
-            approved: false,
-          })
-        }
+        const fd = new FormData()
+        fd.append('file', photos[i])
+        fd.append('is_primary', String(i === 0))
+        await fetch('/api/photos/upload', { method: 'POST', body: fd })
       }
 
       router.push('/subscription')

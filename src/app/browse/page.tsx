@@ -54,7 +54,7 @@ export default async function BrowsePage({ searchParams }: { searchParams: Searc
     .select(`
       id, pseudonym, height_ft, height_in, city, state,
       bio, looking_for, interested_in, lifestyle_tags, is_verified, last_active, date_of_birth,
-      photos(storage_path, blur_level_default, is_primary, approved)
+      photos(storage_path, blurred_path, blur_level_default, is_primary, approved)
     `)
     .eq('city', profile.city)
     .neq('role', 'admin')
@@ -119,26 +119,38 @@ export default async function BrowsePage({ searchParams }: { searchParams: Searc
     .limit(48)
 
   // Resolve photo storage paths to signed URLs (15-min expiry).
-  // For blurred photos (blur_level_default > 1), serve a 20x20 transform so the raw
-  // full-resolution bytes are never sent to the browser — CSS blur alone is bypassable
-  // via DevTools. blur_level 1 means the owner opted into full visibility on browse.
+  // For blurred photos, serve the pre-rendered blurred variant (blurred_path) so raw bytes
+  // never reach the browser. Fall back to 20x20 transform for pre-migration photos without
+  // a blurred_path. blur_level 1 means the owner opted into full visibility on browse.
   const profilesWithUrls = await Promise.all((profiles ?? []).map(async p => {
     const photos = (p.photos as Record<string, unknown>[]) ?? []
     return {
       ...p,
       photos: await Promise.all(photos.map(async ph => {
         let url: string | null = null
-        if (ph.approved && ph.storage_path) {
+        if (ph.approved) {
           const blurLevel = (ph.blur_level_default as number) ?? 3
-          const needsTransform = blurLevel > 1
-          const { data } = await supabase.storage.from('tall-order-photos').createSignedUrl(
-            ph.storage_path as string,
-            900,
-            needsTransform ? { transform: { width: 20, height: 20, resize: 'cover' } } : undefined
-          )
-          url = data?.signedUrl ?? null
+          const needsBlur = blurLevel > 1
+          if (needsBlur && ph.blurred_path) {
+            const { data } = await supabase.storage.from('tall-order-photos').createSignedUrl(
+              ph.blurred_path as string, 900
+            )
+            url = data?.signedUrl ?? null
+          } else if (needsBlur && ph.storage_path) {
+            // Fallback for photos uploaded before blurred_path migration
+            const { data } = await supabase.storage.from('tall-order-photos').createSignedUrl(
+              ph.storage_path as string, 900,
+              { transform: { width: 20, height: 20, resize: 'cover' } }
+            )
+            url = data?.signedUrl ?? null
+          } else if (ph.storage_path) {
+            const { data } = await supabase.storage.from('tall-order-photos').createSignedUrl(
+              ph.storage_path as string, 900
+            )
+            url = data?.signedUrl ?? null
+          }
         }
-        return { ...ph, url }
+        return { ...ph, url, _preBlurred: !!(ph.blurred_path) }
       })),
     }
   }))
@@ -192,7 +204,9 @@ function ProfileCard({ profile }: { profile: Record<string, unknown> }) {
   const photos = (profile.photos as Record<string, unknown>[]) ?? []
   const primaryPhoto = photos.find(ph => ph.is_primary) ?? photos[0]
   const blurLevel = (primaryPhoto?.blur_level_default as number) ?? 3
-  const blurPx = [0, 4, 12, 24, 40][blurLevel - 1] ?? 12
+  const isPreBlurred = !!(primaryPhoto?._preBlurred)
+  // Only apply CSS blur for old photos without a pre-rendered blurred variant
+  const blurPx = isPreBlurred ? 0 : ([0, 4, 12, 24, 40][blurLevel - 1] ?? 12)
   const photoUrl = primaryPhoto?.url as string | null
 
   return (
@@ -207,7 +221,7 @@ function ProfileCard({ profile }: { profile: Record<string, unknown> }) {
             src={photoUrl}
             alt=""
             className="absolute inset-0 w-full h-full object-cover"
-            style={{ filter: `blur(${blurPx}px)`, transform: 'scale(1.1)' }}
+            style={blurPx > 0 ? { filter: `blur(${blurPx}px)`, transform: 'scale(1.1)' } : undefined}
           />
         ) : primaryPhoto ? (
           <div

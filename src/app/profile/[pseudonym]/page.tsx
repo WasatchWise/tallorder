@@ -59,7 +59,7 @@ export default async function ProfilePage({ params }: { params: Promise<{ pseudo
 
   const { data: profile } = await supabase
     .from('profiles')
-    .select(`*, photos(id, storage_path, blur_level_default, is_primary, approved)`)
+    .select(`*, photos(id, storage_path, blurred_path, blur_level_default, is_primary, approved)`)
     .eq('pseudonym', pseudonym)
     .maybeSingle()
 
@@ -118,28 +118,39 @@ export default async function ProfilePage({ params }: { params: Promise<{ pseudo
   const photos = (profile.photos ?? []).filter((p: { approved: boolean }) => p.approved)
   const primaryPhoto = photos.find((p: { is_primary: boolean }) => p.is_primary) ?? photos[0]
   const revealed = revealStatus === 'approved'
-  // If reveal is approved, show photos unblurred.
-  // When NOT revealed, enforce minimum blur level 2 so level 1 doesn't expose photos.
   const rawBlurLevel = primaryPhoto?.blur_level_default ?? 3
   const blurLevel = revealed ? 1 : Math.max(rawBlurLevel, 2)
-  const blurPx = [0, 4, 12, 24, 40][blurLevel - 1] ?? 12
+  // CSS blur only needed for old photos without a pre-rendered blurred variant
+  const cssPx = [0, 4, 12, 24, 40][blurLevel - 1] ?? 12
   const heightDisplay = `${profile.height_ft}'${profile.height_in || 0}"`
 
   // Generate signed URLs for photos (all if revealed, just primary otherwise).
-  // Unrevealed: serve 20x20 transform so full-res bytes never reach the client.
+  // Unrevealed: serve pre-rendered blurred_path so raw bytes never reach the client.
+  // Fall back to 20x20 transform for pre-migration photos without a blurred_path.
   const photosToShow = revealed ? photos : (primaryPhoto ? [primaryPhoto] : [])
   const photoUrls: (string | null)[] = await Promise.all(
-    photosToShow.map(async (p: { storage_path: string }) => {
+    photosToShow.map(async (p: { storage_path: string; blurred_path?: string }) => {
+      if (!revealed && p.blurred_path) {
+        const { data } = await supabase.storage.from('tall-order-photos').createSignedUrl(
+          p.blurred_path, 900
+        )
+        return data?.signedUrl ?? null
+      }
+      if (!revealed && p.storage_path) {
+        // Fallback for photos without blurred_path
+        const { data } = await supabase.storage.from('tall-order-photos').createSignedUrl(
+          p.storage_path, 900,
+          { transform: { width: 20, height: 20, resize: 'cover' } }
+        )
+        return data?.signedUrl ?? null
+      }
       if (!p.storage_path) return null
-      const { data } = await supabase.storage.from('tall-order-photos').createSignedUrl(
-        p.storage_path,
-        900,
-        revealed ? undefined : { transform: { width: 20, height: 20, resize: 'cover' } }
-      )
+      const { data } = await supabase.storage.from('tall-order-photos').createSignedUrl(p.storage_path, 900)
       return data?.signedUrl ?? null
     })
   )
   const primaryPhotoUrl = photoUrls[0] ?? null
+  const primaryHasBlurredPath = !revealed && !!(primaryPhoto as { blurred_path?: string })?.blurred_path
 
   return (
     <div className="min-h-screen bg-[#F5F5F4]">
@@ -153,19 +164,19 @@ export default async function ProfilePage({ params }: { params: Promise<{ pseudo
               src={primaryPhotoUrl}
               alt=""
               className="absolute inset-0 w-full h-full object-cover"
-              style={{ filter: `blur(${blurPx}px)`, transform: 'scale(1.1)' }}
+              style={!primaryHasBlurredPath && cssPx > 0 ? { filter: `blur(${cssPx}px)`, transform: 'scale(1.1)' } : undefined}
             />
           ) : primaryPhoto ? (
             <div
               className="absolute inset-0 bg-gradient-to-br from-stone-300 to-stone-500"
-              style={{ filter: `blur(${blurPx}px)`, transform: 'scale(1.1)' }}
+              style={{ filter: `blur(${cssPx}px)`, transform: 'scale(1.1)' }}
             />
           ) : (
             <div className="absolute inset-0 flex items-center justify-center">
               <div className="w-24 h-24 rounded-full bg-stone-300" />
             </div>
           )}
-          {blurLevel > 1 && (
+          {!revealed && blurLevel > 1 && (
             <div className="absolute bottom-3 left-3 right-3 flex flex-col items-center gap-2">
               <span className="text-xs bg-black/40 text-white px-2 py-1 rounded-full">
                 Photos are blurred by default
@@ -329,7 +340,7 @@ export default async function ProfilePage({ params }: { params: Promise<{ pseudo
         )}
 
         {/* Photo reveal */}
-        {blurLevel > 1 && (
+        {!revealed && blurLevel > 1 && (
           <div className="bg-white border border-[#E7E5E4] rounded-xl px-5 py-4 mb-4">
             <PhotoRevealButton
               targetId={profile.id}

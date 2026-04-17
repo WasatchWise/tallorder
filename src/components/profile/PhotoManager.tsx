@@ -7,6 +7,7 @@ import { Upload, X, Star, Clock, Check, Loader2 } from 'lucide-react'
 interface Photo {
   id: string
   storage_path: string
+  blurred_path?: string
   is_primary: boolean
   approved: boolean
   blur_level_default: number
@@ -30,37 +31,24 @@ export default function PhotoManager({ userId, initialPhotos }: { userId: string
     setError(null)
 
     for (const file of toUpload) {
-      if (file.size > 5 * 1024 * 1024) {
-        setError(`${file.name} is over 5MB. Skipped.`)
-        continue
-      }
-      const ext = file.name.split('.').pop()
-      const path = `${userId}/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`
-
-      const { error: uploadError } = await supabase.storage
-        .from('tall-order-photos')
-        .upload(path, file, { contentType: file.type })
-
-      if (uploadError) {
-        setError('Upload failed. Try again.')
+      if (file.size > 10 * 1024 * 1024) {
+        setError(`${file.name} is over 10MB. Skipped.`)
         continue
       }
 
-      const { data: newPhoto } = await supabase
-        .from('photos')
-        .insert({
-          user_id: userId,
-          storage_path: path,
-          blur_level_default: 3,
-          is_primary: photos.length === 0,
-          approved: false,
-        })
-        .select('id, storage_path, is_primary, approved, blur_level_default')
-        .single()
+      const fd = new FormData()
+      fd.append('file', file)
+      fd.append('is_primary', String(photos.length === 0))
 
-      if (newPhoto) {
-        setPhotos(prev => [...prev, newPhoto])
+      const res = await fetch('/api/photos/upload', { method: 'POST', body: fd })
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}))
+        setError((body as { error?: string }).error ?? 'Upload failed. Try again.')
+        continue
       }
+
+      const newPhoto: Photo = await res.json()
+      setPhotos(prev => [...prev, newPhoto])
     }
 
     setUploading(false)
@@ -74,8 +62,7 @@ export default function PhotoManager({ userId, initialPhotos }: { userId: string
       if (next) await setPrimary(next, false) // silent
     }
 
-    await supabase.storage.from('tall-order-photos').remove([photo.storage_path])
-    await supabase.from('photos').delete().eq('id', photo.id)
+    await fetch(`/api/photos/${photo.id}`, { method: 'DELETE' })
     setPhotos(prev => prev.filter(p => p.id !== photo.id))
   }
 
