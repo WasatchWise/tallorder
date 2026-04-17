@@ -91,7 +91,7 @@ export default function VerifyPage() {
 
     // Upload photo to verification/ prefix
     const ext = photo.name.split('.').pop()
-    const path = `verification/${user.id}/${Date.now()}.${ext}`
+    const path = `${user.id}/verification/${Date.now()}.${ext}`
 
     const { error: uploadErr } = await supabase.storage
       .from('tall-order-photos')
