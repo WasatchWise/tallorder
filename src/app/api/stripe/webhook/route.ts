@@ -20,6 +20,16 @@ export async function POST(req: Request) {
 
   const session = event.data.object as Stripe.Checkout.Session | Stripe.Subscription
 
+  // Idempotency: deduplicate Stripe retries via event_id primary key
+  const { error: dupError } = await supabase
+    .from('stripe_events')
+    .insert({ event_id: event.id })
+  if (dupError) {
+    // 23505 = unique_violation → already processed
+    if (dupError.code === '23505') return NextResponse.json({ received: true })
+    return NextResponse.json({ error: 'Database error' }, { status: 500 })
+  }
+
   switch (event.type) {
     case 'checkout.session.completed': {
       const cs = session as Stripe.Checkout.Session
@@ -30,14 +40,6 @@ export async function POST(req: Request) {
       if (cs.metadata?.type === 'token_pack') {
         const tokens = parseInt(cs.metadata.tokens ?? '0', 10)
         if (tokens > 0) {
-          // Idempotency: skip if this checkout session was already processed
-          const { data: alreadyProcessed } = await supabase
-            .from('token_transactions')
-            .select('id')
-            .eq('reference_id', cs.id)
-            .maybeSingle()
-          if (alreadyProcessed) break
-
           // Credit the tokens
           const { data: existing } = await supabase
             .from('token_balances')

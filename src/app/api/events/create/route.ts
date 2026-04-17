@@ -14,7 +14,7 @@ export async function POST(req: Request) {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
-  const { success: allowed } = rateLimit(`event-create:${user.id}`, 5, 3600_000)
+  const { success: allowed } = await rateLimit(`event-create:${user.id}`, 5, 3600_000)
   if (!allowed) return NextResponse.json({ error: 'Too many requests. Try again later.' }, { status: 429 })
 
   const { data: profile } = await supabase

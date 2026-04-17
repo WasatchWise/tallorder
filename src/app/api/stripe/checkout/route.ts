@@ -17,7 +17,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
-  const { success: allowed } = rateLimit(`checkout:${user.id}`, 5, 3600_000)
+  const { success: allowed } = await rateLimit(`checkout:${user.id}`, 5, 3600_000)
   if (!allowed) return NextResponse.json({ error: 'Too many requests.' }, { status: 429 })
 
   if (!process.env.STRIPE_SECRET_KEY) {
